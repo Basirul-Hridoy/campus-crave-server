@@ -29,7 +29,7 @@ async function run() {
         await client.connect();
 
         const database = client.db("campusDb");
-        const melasCollection = database.collection("melas");
+        const mealsCollection = database.collection("meals");
         const usersCollection = database.collection("users");
         const upcommingMealsCollection = database.collection("upcommingMeals");
         const reviewCollection = database.collection("review");
@@ -63,13 +63,27 @@ async function run() {
             }
         });
 
+        //* Get Admin User
+        app.get("/user/admin/:email", async (req, res) => {
+            const email = req.params?.email;
+            const query = { email: email };
+            const user = await usersCollection.findOne(query);
+
+            if (!user) {
+                return res.status(404).send({ error: "User not found" });
+            }
+
+            const admin = user.role === "admin";
+            res.send({ admin });
+        });
+
         //* Update user role from database
         app.patch("/users/:id", async (req, res) => {
             const userId = req.params.id;
             const query = { _id: new ObjectId(userId) };
             const updatedDoc = {
                 $set: {
-                    role: "Admin"
+                    role: "admin"
                 }
             }
             const result = await usersCollection.updateOne(query, updatedDoc);
@@ -87,26 +101,47 @@ async function run() {
         //**Post meal data on the database */
         app.post("/meals", async (req, res) => {
             const mealsData = req.body;
-            const filter = await melasCollection.findOne(mealsData);
+            console.log(mealsData);
 
-            if (!filter) {
-                const result = await melasCollection.insertOne(mealsData);
+            //*Delete time data before findout the database for checking the existing meal
+            const mealDataWithoutTime = { ...mealsData };
+            delete mealDataWithoutTime.time;
+            console.log("without time", mealDataWithoutTime);
+
+            //* Checking the existing meal from databse for handle not post same data
+            const existingMeals = await mealsCollection.findOne(mealDataWithoutTime);
+            console.log("exist", existingMeals);
+
+            if (!existingMeals) {
+                const result = await mealsCollection.insertOne(mealsData);
                 if (result.insertedId) {
                     res.send({ success: true, message: "meals added successfully" })
                 } else {
                     res.send({ success: false, message: "something went wrong" })
                 }
+            } else {
+                res.send({ success: false, message: "this meal already added" })
             }
         })
 
         //* Get all meals data from database
         app.get("/meals", async (req, res) => {
+            const searchTerm = req.query.search;
             const page = parseInt(req.query.page) || 1;
-            const limit = parseInt(req.query.limit) || 15;
+            const limit = parseInt(req.query.limit) || 100;
             const skip = (page - 1) * limit;
+            const query = {}
+
+
+            if (searchTerm) {
+                query.$or = [
+                    { title: { $regex: searchTerm, $options: "i" } },
+                    { distributorEmail: { $regex: searchTerm, $options: "i" } }
+                ]
+            }
 
             try {
-                const mealsData = await melasCollection.find().skip(skip).limit(limit).toArray();
+                const mealsData = await mealsCollection.find(query).skip(skip).limit(limit).toArray();
                 res.send(mealsData);
             } catch (error) {
                 res.status(500).send({ error: "Error fetching meals data" })
@@ -114,11 +149,16 @@ async function run() {
 
         });
 
+        app.get("/all-meals", async (req, res) => {
+            const result = await mealsCollection.find().toArray()
+            res.send(result)
+        })
+
         //* Get a single meal from database by filtering meal ID 
         app.get("/meals/:id", async (req, res) => {
             const mealId = req.params.id;
             const query = { _id: new ObjectId(mealId) };
-            const result = await melasCollection.findOne(query);
+            const result = await mealsCollection.findOne(query);
             res.send(result)
         });
 
@@ -126,7 +166,7 @@ async function run() {
         app.delete("/meals/:id", async (req, res) => {
             const id = req.params.id;
             const filter = { _id: new ObjectId(id) };
-            const result = await melasCollection.deleteOne(filter);
+            const result = await mealsCollection.deleteOne(filter);
             if (result.deletedCount > 0) {
                 res.send({ success: true, message: "meal deleted successfully" })
             }
@@ -147,7 +187,7 @@ async function run() {
             }
 
             try {
-                const result = await melasCollection.updateOne(filter, updatedDoc);
+                const result = await mealsCollection.updateOne(filter, updatedDoc);
                 console.log(result);
                 if (result.matchedCount === 0) {
                     res.status(404).send({ error: "Meal not found" });
@@ -170,7 +210,7 @@ async function run() {
             }
 
             try {
-                const result = await melasCollection.updateOne(filter, updatedDoc);
+                const result = await me.updateOne(filter, updatedDoc);
                 if (result.matchedCount === 0) {
                     res.status(404).send({ error: "Meal not found" });
                 } else {
